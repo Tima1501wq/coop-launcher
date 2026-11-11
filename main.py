@@ -1,15 +1,11 @@
 import sys
 from PyQt6.QtWidgets import QApplication
-from ui import LauncherWindow
-
-
-def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("Coop Launcher")
-    win = LauncherWindow()
-    win.show()
-    sys.exit(app.exec())
-
+from PyQt6.QtGui import QFont
+from ui import SplashScreen
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+    app.setFont(QFont("Segoe UI", 10))
+    splash = SplashScreen()
+    splash.show()
+    sys.exit(app.exec())
