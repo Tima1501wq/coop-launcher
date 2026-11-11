@@ -1,6 +1,7 @@
 import sys
 import math
 import threading
+import urllib.request
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFrame, QSizePolicy, QStackedWidget,
@@ -10,30 +11,21 @@ from PyQt6.QtCore import (
     Qt, QPropertyAnimation, QEasingCurve, QTimer, QPoint, pyqtSignal
 )
 from PyQt6.QtGui import (
-    QColor, QFont, QPainter, QLinearGradient, QRadialGradient, QPen, QBrush
+    QColor, QFont, QPainter, QLinearGradient, QRadialGradient, QPen, QBrush, QPixmap
 )
-from games import Game, scan_all
-import urllib.request
+from games import Game, scan_all, get_steam_cover_url, fetch_steam_details
+from friends import fetch_steam_friends, get_dummy_friends
 
 USER_PROFILE = {"name": "Tima", "avatar_color": "#555555"}
 FONT_MAIN = "Segoe UI"
 FONT_LIGHT = "Segoe UI Light"
-
-MOCK_FRIENDS = [
-    {"name": "Tima", "status": "В сети", "game": "", "launcher": "Steam", "online": True},
-    {"name": "Ivan", "status": "Играет", "game": "CS:GO", "launcher": "Steam", "online": True},
-    {"name": "Alex", "status": "Играет", "game": "Dota 2", "launcher": "Epic", "online": True},
-    {"name": "Dmitry", "status": "Не в сети", "game": "", "launcher": "Steam", "online": False},
-]
 
 BG        = "#050505"                    
 PANEL     = "rgba(45, 45, 45, 0.85)"     
 BORDER    = "rgba(255, 255, 255, 0.15)"  
 TEXT      = "#FFFFFF"                    
 TEXT_DIM  = "rgba(255, 255, 255, 0.45)"  
-ACCENT    = "#FFFFFF"                    
 
-# Цвета для заглушек игр (генерируются по хэшу названия)
 def get_color_for_game(name):
     colors = ["#3d6cff", "#ff5722", "#00a8a8", "#8c3cc8", "#c0392b", "#d4af37", "#aa0000", "#ff007f"]
     return colors[hash(name) % len(colors)]
@@ -102,11 +94,10 @@ class GameListItem(QFrame):
         layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(15)
         
-        icon = QLabel()
-        icon.setFixedSize(40, 40)
-        c = get_color_for_game(game.name)
-        icon.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c}, stop:1 #000000); border-radius: 8px;")
-        layout.addWidget(icon)
+        self.icon = QLabel()
+        self.icon.setFixedSize(40, 40)
+        self.icon.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {get_color_for_game(game.name)}, stop:1 #000000); border-radius: 8px;")
+        layout.addWidget(self.icon)
         
         text_layout = QVBoxLayout()
         text_layout.setSpacing(2)
@@ -122,6 +113,11 @@ class GameListItem(QFrame):
         layout.addLayout(text_layout)
         layout.addStretch()
 
+    def set_cover(self, pixmap):
+        if pixmap and not pixmap.isNull():
+            self.icon.setPixmap(pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+            self.icon.setStyleSheet("border-radius: 8px;")
+
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.game)
@@ -136,27 +132,32 @@ class FriendListItem(QFrame):
         layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(15)
         
-        av = QLabel()
-        av.setFixedSize(40, 40)
-        color = "#FFFFFF" if friend['online'] else "#444444"
-        av.setStyleSheet(f"background: {color}; border-radius: 20px;")
-        layout.addWidget(av)
+        self.av = QLabel()
+        self.av.setFixedSize(40, 40)
+        color = "#FFFFFF" if friend.get('online') else "#444444"
+        self.av.setStyleSheet(f"background: {color}; border-radius: 20px;")
+        layout.addWidget(self.av)
         
         col = QVBoxLayout()
         col.setSpacing(2)
         
-        name = QLabel(friend['name'])
+        name = QLabel(friend.get('name', 'Unknown'))
         name.setStyleSheet(f"color: {TEXT}; font-size: 14px; font-weight: 600; font-family: '{FONT_MAIN}';")
         
-        status_color = TEXT if friend['game'] else TEXT_DIM
-        status_text = friend['game'] if friend['game'] else friend['status']
-        status = QLabel(f"{friend['launcher']} • {status_text}")
+        status_color = TEXT if friend.get('game') else TEXT_DIM
+        status_text = friend.get('game') if friend.get('game') else friend.get('status', '')
+        status = QLabel(f"{friend.get('launcher', '')} • {status_text}")
         status.setStyleSheet(f"color: {status_color}; font-size: 11px; font-weight: 600;")
         
         col.addWidget(name)
         col.addWidget(status)
         layout.addLayout(col)
         layout.addStretch()
+
+    def set_avatar(self, pixmap):
+        if pixmap and not pixmap.isNull():
+            self.av.setPixmap(pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+            self.av.setStyleSheet("border-radius: 20px;")
 
 class DropdownPanel(QFrame):
     def __init__(self, parent, on_state_change):
@@ -244,6 +245,10 @@ class DropdownPanel(QFrame):
 
 class MainWindow(QMainWindow):
     games_loaded = pyqtSignal(list)
+    cover_loaded = pyqtSignal(str, bytes)
+    desc_loaded = pyqtSignal(str)
+    friends_loaded = pyqtSignal(list)
+    avatar_loaded = pyqtSignal(str, bytes)
 
     def __init__(self):
         super().__init__()
@@ -255,6 +260,7 @@ class MainWindow(QMainWindow):
         self.selected_game = None
         self.anim_t = 0
         self.games = []
+        self.game_items = {}
         
         self.init_ui()
         
@@ -262,30 +268,95 @@ class MainWindow(QMainWindow):
         self.bg_timer.timeout.connect(self.animate_bg)
         self.bg_timer.start(30)
 
-        # Поток для сканирования игр
         self.games_loaded.connect(self.on_games_loaded)
+        self.cover_loaded.connect(self.on_cover_loaded)
+        self.desc_loaded.connect(self.on_desc_loaded)
+        self.friends_loaded.connect(self.on_friends_loaded)
+        self.avatar_loaded.connect(self.on_avatar_loaded)
+
         threading.Thread(target=self.scan_worker, daemon=True).start()
+        threading.Thread(target=self.load_friends_worker, daemon=True).start()
 
     def scan_worker(self):
         try:
             games = scan_all()
             self.games_loaded.emit(games)
         except Exception as e:
-            print(f"Error scanning: {e}")
+            print(f"Ошибка сканирования: {e}")
 
     def on_games_loaded(self, games):
         self.games = games
-        # Очищаем старое содержимое
         for i in reversed(range(self.games_layout.count())): 
             widget = self.games_layout.itemAt(i).widget()
             if widget: widget.setParent(None)
         
-        # Заполняем реальными играми
         for g in self.games:
             item = GameListItem(g)
             item.clicked.connect(self.select_game)
             self.games_layout.addWidget(item)
+            self.game_items[g.key] = item
         self.games_layout.addStretch()
+        
+        threading.Thread(target=self.load_covers_worker, daemon=True).start()
+
+    def load_covers_worker(self):
+        for g in self.games:
+            if g.source == "steam":
+                url = get_steam_cover_url(g.app_id)
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        data = r.read()
+                    self.cover_loaded.emit(g.key, data)
+                except Exception:
+                    pass
+
+    def on_cover_loaded(self, key, data):
+        item = self.game_items.get(key)
+        if item:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(data):
+                item.set_cover(pixmap)
+
+    def load_friends_worker(self):
+        friends = fetch_steam_friends()
+        if not friends:
+            friends = get_dummy_friends()
+        self.friends_loaded.emit(friends)
+
+    def on_friends_loaded(self, friends):
+        while self.friends_container.count():
+            item = self.friends_container.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        
+        self.friend_items = []
+        for f in friends:
+            item = FriendListItem(f)
+            self.friends_container.addWidget(item)
+            self.friend_items.append((f, item))
+        self.friends_container.addStretch()
+        
+        threading.Thread(target=self.load_avatars_worker, args=(friends,), daemon=True).start()
+
+    def load_avatars_worker(self, friends):
+        for f in friends:
+            url = f.get("avatar", "")
+            if url:
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        data = r.read()
+                    self.avatar_loaded.emit(f["steam_id"], data)
+                except Exception:
+                    pass
+
+    def on_avatar_loaded(self, steam_id, data):
+        pixmap = QPixmap()
+        if pixmap.loadFromData(data):
+            for f, item in getattr(self, 'friend_items', []):
+                if f.get("steam_id") == steam_id:
+                    item.set_avatar(pixmap)
+                    break
 
     def animate_bg(self):
         self.anim_t += 0.01
@@ -315,7 +386,6 @@ class MainWindow(QMainWindow):
         main_l.setContentsMargins(0, 0, 0, 0)
         main_l.setSpacing(0)
 
-        # ВЕРХНЯЯ ПАНЕЛЬ
         top = QWidget()
         top.setFixedHeight(70)
         top.setStyleSheet(f"background: {PANEL}; border-bottom: 1px solid {BORDER};")
@@ -352,12 +422,10 @@ class MainWindow(QMainWindow):
         tl.addWidget(av)
         main_l.addWidget(top)
 
-        # НИЖНЯЯ ЧАСТЬ
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # Библиотека
         lib_w = QWidget()
         lib_w.setStyleSheet("background: transparent;")
         lib_l = QVBoxLayout(lib_w)
@@ -385,7 +453,6 @@ class MainWindow(QMainWindow):
         self.games_layout = QVBoxLayout(sg_w)
         self.games_layout.setContentsMargins(0, 0, 0, 0)
         self.games_layout.setSpacing(5)
-        # Сюда добавятся игры после сканирования
         scroll_games.setWidget(sg_w)
         lib_l.addWidget(scroll_games)
         
@@ -393,7 +460,6 @@ class MainWindow(QMainWindow):
         self.dropdown_lib.set_content(lib_w)
         btn_pin_lib.clicked.connect(self.dropdown_lib.toggle_pin)
 
-        # Друзья
         fr_w = QWidget()
         fr_w.setStyleSheet("background: transparent;")
         fr_l = QVBoxLayout(fr_w)
@@ -413,12 +479,9 @@ class MainWindow(QMainWindow):
         scroll_fr.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar { width: 0; }")
         sf_w = QWidget()
         sf_w.setStyleSheet("background: transparent;")
-        sf_l = QVBoxLayout(sf_w)
-        sf_l.setContentsMargins(0, 0, 0, 0)
-        sf_l.setSpacing(5)
-        for f in MOCK_FRIENDS:
-            sf_l.addWidget(FriendListItem(f))
-        sf_l.addStretch()
+        self.friends_container = QVBoxLayout(sf_w)
+        self.friends_container.setContentsMargins(0, 0, 0, 0)
+        self.friends_container.setSpacing(5)
         scroll_fr.setWidget(sf_w)
         fr_l.addWidget(scroll_fr)
         
@@ -426,7 +489,6 @@ class MainWindow(QMainWindow):
         self.dropdown_friends.set_content(fr_w)
         btn_pin_fr.clicked.connect(self.dropdown_friends.toggle_pin)
 
-        # ЦЕНТР
         self.stack = QStackedWidget()
         self.stack.setStyleSheet("background: transparent;")
 
@@ -494,12 +556,11 @@ class MainWindow(QMainWindow):
         
         self.g_title.setText(game.name)
         self.g_meta.setText(f"{game.source.upper()}")
-        self.g_desc.setText(f"Игра из библиотеки {game.source.capitalize()}. Нажмите «Играть», чтобы запустить её.")
+        self.g_desc.setText("Загрузка описания...")
         
         c = get_color_for_game(game.name)
         self.art_frame.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(5, 5, 5, 0.95), stop:0.5 rgba(5, 5, 5, 0.5)),
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(5, 5, 5, 0.95), stop:0.5 rgba(5, 5, 5, 0.5)),
                 qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c}, stop:1 {BG});
             border-radius: 24px;
             border: 1px solid rgba(255,255,255,0.05);
@@ -510,12 +571,28 @@ class MainWindow(QMainWindow):
         self.btn_action.setEnabled(True)
         self.btn_action.setStyleSheet(f"QPushButton {{ background: {TEXT}; color: {BG}; border: none; border-radius: 30px; font-weight: 800; letter-spacing: 2px; font-size: 16px; }} QPushButton:hover {{ background: #CCCCCC; }}")
 
+        if game.source == "steam":
+            threading.Thread(target=self.load_desc_worker, args=(game,), daemon=True).start()
+        else:
+            self.g_desc.setText(f"Игра из библиотеки {game.source.capitalize()}.")
+
+    def load_desc_worker(self, game):
+        details = fetch_steam_details(game.app_id)
+        desc = details.get("description", "")
+        genres = ", ".join(details.get("genres", []))
+        full = desc + (f"\n\nЖанры: {genres}" if genres else "")
+        if full.strip():
+            self.desc_loaded.emit(full)
+        else:
+            self.desc_loaded.emit("Описание недоступно.")
+
+    def on_desc_loaded(self, text):
+        self.g_desc.setText(text)
+
     def on_action_clicked(self):
         if not self.selected_game: return
-        # РЕАЛЬНЫЙ ЗАПУСК ИГРЫ
         import os
         os.startfile(self.selected_game.launch_uri)
-        
         self.btn_action.setText("ЗАПУЩЕНО")
         self.btn_action.setEnabled(False)
         self.btn_action.setStyleSheet(f"QPushButton {{ background: transparent; color: {TEXT_DIM}; border: 1px solid {BORDER}; border-radius: 30px; font-weight: 800; letter-spacing: 2px; font-size: 16px; }}")
