@@ -3,7 +3,7 @@ import urllib.request
 
 # ⚠️ ВСТАВЬ СВОИ ДАННЫЕ СЮДА:
 STEAM_API_KEY = "ВСТАВЬ_СВОЙ_КЛЮЧ"
-STEAM_ID = "s_tima7"
+STEAM_ID = "76561199651917235"
 
 
 def fetch_steam_friends() -> list:
