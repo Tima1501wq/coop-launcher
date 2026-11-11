@@ -1,0 +1,40 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install PyQt6 pyinstaller
+
+      - name: Build exe
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --windowed --onedir --name CoopLauncher `
+            --icon icon.ico `
+            --exclude-module PyQt6.QtQml `
+            --exclude-module PyQt6.QtQuick `
+            --exclude-module PyQt6.QtWebEngineCore `
+            --exclude-module PyQt6.QtMultimedia `
+            main.py
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/CoopLauncher/* -DestinationPath CoopLauncher-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoopLauncher-windows
+          path: CoopLauncher-windows.zip
