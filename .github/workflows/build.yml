@@ -18,6 +18,11 @@ jobs:
       - name: Install deps
         run: pip install PyQt6 pyinstaller
 
+      - name: Clean old builds
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force build, dist, CoopLauncher.spec -ErrorAction SilentlyContinue
+
       - name: Build exe
         shell: pwsh
         run: |
