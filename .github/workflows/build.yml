@@ -20,9 +20,10 @@ jobs:
 
       - name: Build exe
         shell: pwsh
+        working-directory: ${{ github.workspace }}
         run: |
           pyinstaller --noconfirm --windowed --onedir --name CoopLauncher `
-            --icon icon.ico `
+            --icon icon.ico ` 
             --exclude-module PyQt6.QtQml `
             --exclude-module PyQt6.QtQuick `
             --exclude-module PyQt6.QtWebEngineCore `
