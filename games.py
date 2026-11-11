@@ -3,6 +3,7 @@ import json, os, re, sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+import urllib.request
 
 @dataclass
 class Game:
@@ -10,8 +11,6 @@ class Game:
     app_id: str
     name: str
     launch_uri: str
-    cover_url: Optional[str] = None
-    install_dir: Optional[str] = None
 
     @property
     def key(self) -> str:
@@ -146,3 +145,23 @@ def scan_all() -> list[Game]:
         out.append(g)
     out.sort(key=lambda g: g.name.lower())
     return out
+
+def get_steam_cover_url(app_id: str) -> str:
+    return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/header.jpg"
+
+def fetch_steam_details(app_id: str) -> dict:
+    url = f"https://store.steampowered.com/api/appdetails?appids={app_id}&l=russian"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        entry = data.get(app_id)
+        if entry and entry.get("success"):
+            d = entry["data"]
+            return {
+                "description": d.get("short_description", ""),
+                "genres": [g["description"] for g in d.get("genres", [])],
+            }
+    except Exception:
+        pass
+    return {}
