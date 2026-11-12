@@ -146,8 +146,14 @@ def scan_all() -> list[Game]:
     out.sort(key=lambda g: g.name.lower())
     return out
 
-def get_steam_cover_url(app_id: str) -> str:
-    return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/header.jpg"
+# --- URL ДЛЯ КАРТИНОК STEAM ---
+def get_steam_capsule_url(app_id: str) -> str:
+    """Маленькая обложка для списка в сайдбаре"""
+    return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/capsule_231x87.jpg"
+
+def get_steam_hero_url(app_id: str) -> str:
+    """Огромный арт для главного экрана"""
+    return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_hero.jpg"
 
 def fetch_steam_details(app_id: str) -> dict:
     url = f"https://store.steampowered.com/api/appdetails?appids={app_id}&l=russian"
