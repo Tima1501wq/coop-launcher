@@ -2,7 +2,7 @@ import json
 import urllib.request
 
 # ⚠️ ВСТАВЬ СВОИ ДАННЫЕ СЮДА:
-STEAM_API_KEY = "ВСТАВЬ_СВОЙ_КЛЮЧ"
+STEAM_API_KEY = "581AB145D056E4818CDA3CA2CA2CC416"
 STEAM_ID = "76561199651917235"
 
 
